@@ -11,6 +11,7 @@ from forge.runtime.filesystem import ImageStore
 from forge.orchestration.engine import OrchestrationEngine
 from forge.orchestration.executor import WorkflowExecutor
 from forge.scheduler.scheduler import WorkflowScheduler
+from forge.scheduler.manager import SchedulerManager
 from rich.console import Console
 from rich.table import Table
 
@@ -19,6 +20,7 @@ executor = ContainerExecutor()
 image_store = ImageStore()
 orchestration = OrchestrationEngine()
 workflow_executor = WorkflowExecutor()
+scheduler_manager = SchedulerManager()
 scheduler = WorkflowScheduler()
 
 
@@ -331,6 +333,176 @@ def list():
         console.print("[red]No forge.yml found[/red]")
     except Exception as e:
         console.print(f"[red]Error listing workflows: {e}[/red]")
+
+
+# ─── Scheduler Commands ───
+
+
+@cli.group()
+def scheduler():
+    """Manage workflow scheduling."""
+    pass
+
+
+@scheduler.command()
+@click.argument("workflow_name")
+@click.option("--cron", required=True, help="Cron schedule (e.g., '0 2 * * *')")
+@click.option("--config", type=click.Path(exists=True), help="Path to forge.yml")
+def schedule(workflow_name: str, cron: str, config: str):
+    """Schedule a workflow for automatic execution.
+    
+    Example:
+        forge scheduler schedule daily_etl --cron '0 2 * * *'
+    """
+    try:
+        if config:
+            with open(config) as f:
+                import yaml
+                config_data = yaml.safe_load(f)
+        else:
+            with open("forge.yml") as f:
+                import yaml
+                config_data = yaml.safe_load(f)
+        
+        workflow_config = config_data.get("workflows", {}).get(workflow_name)
+        if not workflow_config:
+            console.print(f"[red]Workflow '{workflow_name}' not found[/red]")
+            return
+        
+        workflow_config["name"] = workflow_name
+        
+        # Schedule the workflow
+        success = scheduler_manager.schedule_workflow(workflow_config, cron)
+        
+        if success:
+            console.print(f"[green]✓ Scheduled {workflow_name} ({cron})[/green]")
+        else:
+            console.print(f"[red]✗ Failed to schedule {workflow_name}[/red]")
+    
+    except FileNotFoundError:
+        console.print("[red]forge.yml not found[/red]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+
+@scheduler.command()
+@click.argument("workflow_name")
+def unschedule(workflow_name: str):
+    """Remove a scheduled workflow."""
+    success = scheduler_manager.unschedule_workflow(workflow_name)
+    
+    if success:
+        console.print(f"[green]✓ Unscheduled {workflow_name}[/green]")
+    else:
+        console.print(f"[red]✗ Failed to unschedule {workflow_name}[/red]")
+
+
+@scheduler.command()
+@click.argument("workflow_name")
+def pause(workflow_name: str):
+    """Pause a scheduled workflow."""
+    success = scheduler_manager.pause_workflow(workflow_name)
+    
+    if success:
+        console.print(f"[green]✓ Paused {workflow_name}[/green]")
+    else:
+        console.print(f"[red]✗ Failed to pause {workflow_name}[/red]")
+
+
+@scheduler.command()
+@click.argument("workflow_name")
+def resume(workflow_name: str):
+    """Resume a paused workflow."""
+    success = scheduler_manager.resume_workflow(workflow_name)
+    
+    if success:
+        console.print(f"[green]✓ Resumed {workflow_name}[/green]")
+    else:
+        console.print(f"[red]✗ Failed to resume {workflow_name}[/red]")
+
+
+@scheduler.command()
+@click.argument("workflow_name")
+def trigger(workflow_name: str):
+    """Manually trigger a scheduled workflow now."""
+    start = time.time()
+    success = scheduler_manager.trigger_now(workflow_name)
+    elapsed = time.time() - start
+    
+    if success:
+        console.print(f"[green]✓ Triggered {workflow_name} in {elapsed:.2f}s[/green]")
+    else:
+        console.print(f"[red]✗ Failed to trigger {workflow_name}[/red]")
+
+
+@scheduler.command()
+@click.argument("workflow_name")
+@click.option("--start", required=True, help="Start date (YYYY-MM-DD)")
+@click.option("--end", required=True, help="End date (YYYY-MM-DD)")
+def backfill(workflow_name: str, start: str, end: str):
+    """Backfill workflow executions for a date range.
+    
+    Example:
+        forge scheduler backfill daily_etl --start 2024-01-01 --end 2024-01-31
+    """
+    console.print(f"[cyan]Backfilling {workflow_name} from {start} to {end}...[/cyan]")
+    
+    count = scheduler_manager.backfill(workflow_name, start, end)
+    
+    console.print(f"[green]✓ Queued {count} executions[/green]")
+
+
+@scheduler.command()
+def status():
+    """Show scheduler status."""
+    status = scheduler_manager.get_status()
+    
+    table = Table(title="Scheduler Status")
+    table.add_column("Property", style="cyan")
+    table.add_column("Value", style="green")
+    
+    table.add_row("Running", "✓ Yes" if status["running"] else "✗ No")
+    table.add_row("Scheduled Workflows", str(status["scheduled_workflows"]))
+    table.add_row("Pending Executions", str(status["pending_executions"]))
+    
+    console.print(table)
+    
+    if status["workflows"]:
+        console.print("")
+        wf_table = Table(title="Scheduled Workflows")
+        wf_table.add_column("Workflow", style="cyan")
+        wf_table.add_column("Schedule", style="green")
+        wf_table.add_column("Next Run", style="dim")
+        wf_table.add_column("Enabled", style="yellow")
+        
+        for wf in status["workflows"]:
+            enabled_str = "[green]✓[/green]" if wf["enabled"] else "[yellow]⊘[/yellow]"
+            wf_table.add_row(
+                wf["workflow_id"],
+                wf["schedule"],
+                wf["next_run"][:16] if wf["next_run"] else "—",
+                enabled_str,
+            )
+        
+        console.print(wf_table)
+
+
+@scheduler.command()
+def start():
+    """Start the scheduler daemon."""
+    if scheduler_manager.start():
+        console.print("[green]✓ Scheduler daemon started[/green]")
+    else:
+        console.print("[red]✗ Scheduler daemon already running[/red]")
+
+
+@scheduler.command()
+def stop():
+    """Stop the scheduler daemon."""
+    if scheduler_manager.stop():
+        console.print("[green]✓ Scheduler daemon stopped[/green]")
+    else:
+        console.print("[red]✗ Scheduler daemon not running[/red]")
 
 
 # ─── System Commands ───
