@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import time
 import json
+import subprocess
 
 from forge.runtime.executor import ContainerExecutor, ContainerConfig
 from forge.runtime.filesystem import ImageStore
@@ -13,6 +14,8 @@ from forge.orchestration.executor import WorkflowExecutor
 from forge.scheduler.scheduler import WorkflowScheduler
 from forge.scheduler.manager import SchedulerManager
 from forge.tui.dashboard import Dashboard
+from forge.benchmarks.runner import BenchmarkRunner
+from forge.benchmarks.profiler import MemoryProfiler, PerformanceProfiler, SystemAnalyzer
 from rich.console import Console
 from rich.table import Table
 
@@ -557,6 +560,157 @@ def tui():
     except Exception as e:
         console.print(f"[red]Error launching TUI: {e}[/red]", err=True)
         sys.exit(1)
+
+
+# ─── Benchmark Commands ───
+
+
+@cli.group()
+def benchmark():
+    """Performance benchmarking and profiling."""
+    pass
+
+
+@benchmark.command()
+@click.option("--iterations", type=int, default=5, help="Number of iterations")
+@click.option("--runtime", type=click.Choice(["forge", "podman", "docker"]), default="forge")
+def startup(iterations, runtime):
+    """Benchmark container startup time."""
+    runner = BenchmarkRunner()
+    console.print(f"[cyan]Benchmarking {runtime} container startup ({iterations} iterations)...[/cyan]")
+    
+    result = runner.benchmark_container_startup(runtime, iterations)
+    
+    table = Table(title=f"Container Startup Benchmark ({runtime})")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+    
+    table.add_row("Average", f"{result.get('average_ms', 0):.1f} ms")
+    table.add_row("Min", f"{result.get('min_ms', 0):.1f} ms")
+    table.add_row("Max", f"{result.get('max_ms', 0):.1f} ms")
+    table.add_row("Successful", f"{result.get('successful', 0)}/{iterations}")
+    
+    console.print(table)
+
+
+@benchmark.command()
+@click.option("--runtime", type=click.Choice(["forge", "podman", "docker"]), default="forge")
+@click.option("--samples", type=int, default=10, help="Number of samples")
+def memory(runtime, samples):
+    """Benchmark memory usage."""
+    runner = BenchmarkRunner()
+    console.print(f"[cyan]Benchmarking {runtime} memory usage ({samples} samples)...[/cyan]")
+    
+    result = runner.benchmark_memory_usage(runtime, samples)
+    
+    table = Table(title=f"Memory Usage Benchmark ({runtime})")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+    
+    table.add_row("Average", f"{result.get('average_mb', 0):.1f} MB")
+    table.add_row("Min", f"{result.get('min_mb', 0):.1f} MB")
+    table.add_row("Max", f"{result.get('max_mb', 0):.1f} MB")
+    
+    console.print(table)
+
+
+@benchmark.command()
+@click.option("--runtime", type=click.Choice(["forge", "podman", "docker"]), default="forge")
+def disk(runtime):
+    """Benchmark disk usage."""
+    runner = BenchmarkRunner()
+    console.print(f"[cyan]Benchmarking {runtime} disk usage...[/cyan]")
+    
+    result = runner.benchmark_disk_usage(runtime)
+    
+    if "error" in result:
+        console.print(f"[red]Error: {result['error']}[/red]")
+    else:
+        console.print(f"[green]✓ Disk usage: {result.get('size_mb', 0):.1f} MB[/green]")
+
+
+@benchmark.command()
+def compare():
+    """Compare Forge vs Podman (if available)."""
+    runner = BenchmarkRunner()
+    runtimes = []
+    
+    # Check which runtimes are available
+    for rt in ["forge", "podman"]:
+        try:
+            subprocess.run(
+                [rt, "--version"] if rt == "forge" else ["podman", "--version"],
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+            runtimes.append(rt)
+        except:
+            pass
+    
+    if not runtimes:
+        console.print("[red]No runtimes available for comparison[/red]")
+        return
+    
+    console.print(f"[cyan]Comparing {' vs '.join(runtimes)}...[/cyan]")
+    
+    results = {}
+    for runtime in runtimes:
+        results[runtime] = {
+            "startup": runner.benchmark_container_startup(runtime, iterations=3),
+            "memory": runner.benchmark_memory_usage(runtime, sample_count=3),
+            "disk": runner.benchmark_disk_usage(runtime),
+        }
+    
+    # Display comparison table
+    table = Table(title="Performance Comparison")
+    table.add_column("Metric", style="cyan")
+    for rt in runtimes:
+        table.add_column(rt.upper(), style="green")
+    
+    # Startup comparison
+    startup_values = [f"{results[rt]['startup'].get('average_ms', 0):.1f}ms" for rt in runtimes]
+    table.add_row("Startup (avg)", *startup_values)
+    
+    # Memory comparison
+    memory_values = [f"{results[rt]['memory'].get('average_mb', 0):.1f}MB" for rt in runtimes]
+    table.add_row("Memory (avg)", *memory_values)
+    
+    # Disk comparison
+    disk_values = [f"{results[rt]['disk'].get('size_mb', 0):.1f}MB" for rt in runtimes]
+    table.add_row("Disk", *disk_values)
+    
+    console.print(table)
+    
+    # Save results
+    output_file = runner.save_results()
+    console.print(f"\n[green]✓ Results saved to {output_file}[/green]")
+
+
+@benchmark.command()
+@click.option("--samples", type=int, default=10, help="Number of samples")
+def profile(samples):
+    """Profile memory and performance."""
+    profiler = MemoryProfiler()
+    
+    console.print(f"[cyan]Profiling memory ({samples} samples)...[/cyan]")
+    
+    for i in range(samples):
+        snapshot = profiler.take_snapshot()
+        if snapshot:
+            console.print(f"  Sample {i+1}: {snapshot.process_rss_mb:.1f}MB RSS")
+        time.sleep(0.5)
+    
+    output_file = profiler.save_snapshots()
+    console.print(f"[green]✓ Profile saved to {output_file}[/green]")
+    
+    profiler.print_summary()
+
+
+@benchmark.command()
+def resources():
+    """Show system resources."""
+    SystemAnalyzer.print_resource_info()
 
 
 def main():
