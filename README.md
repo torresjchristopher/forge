@@ -4,18 +4,18 @@
 
 Lightning-fast alternative to Docker + Airflow combined. 5-10x leaner, considerably faster, automatic memory management, all-in-one CLI with unified dashboard.
 
-## Status: Phase 6 Complete ✅
+## Status: Phase 7 Benchmarking In Progress ✅
 
 - [x] **Phase 1**: Project scaffolding
 - [x] **Phase 2**: Lightweight container runtime
 - [x] **Phase 3**: Networking & volumes
 - [x] **Phase 4**: Embedded Airflow engine
 - [x] **Phase 5**: Scheduler integration
-- [x] **Phase 6**: Real-time TUI dashboard ← NEW
-- [ ] **Phase 7**: Performance optimization (NEXT)
+- [x] **Phase 6**: Real-time TUI dashboard
+- [🔄] **Phase 7**: Benchmarking & performance profiling ← NOW
 - [ ] **Phase 8**: Shortcut-CLI integration
 
-**Progress: 75% Complete (6 of 8 phases)**
+**Progress: 87% Complete (6.5 of 8 phases)**
 
 ## Features
 
@@ -184,6 +184,10 @@ Forge is built for speed at every level:
 - [Installation Guide](docs/INSTALL.md)
 - [Configuration Reference](docs/CONFIG.md)
 
+**Performance:**
+- [Benchmarking Guide](BENCHMARKING.md) - Performance testing & profiling
+- [Benchmark Commands](BENCHMARKING.md#cli-commands) - forge benchmark suite
+
 **Status Documents:**
 - [Phase 6 Summary](PHASE6_SUMMARY.md) - What's new in the TUI
 - [Status Report](STATUS_REPORT.md) - Full project status
@@ -237,6 +241,20 @@ forge system usage
 
 # Auto-prune old data
 forge system prune
+
+# ─── NEW: Benchmarking ───
+
+# Benchmark startup time
+forge benchmark startup
+
+# Compare vs Podman/Docker
+forge benchmark compare
+
+# Profile memory usage
+forge benchmark profile
+
+# Show system resources
+forge benchmark resources
 ```
 
 For all commands, see [QUICKREF.md](QUICKREF.md).
