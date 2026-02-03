@@ -12,6 +12,7 @@ from forge.orchestration.engine import OrchestrationEngine
 from forge.orchestration.executor import WorkflowExecutor
 from forge.scheduler.scheduler import WorkflowScheduler
 from forge.scheduler.manager import SchedulerManager
+from forge.tui.dashboard import Dashboard
 from rich.console import Console
 from rich.table import Table
 
@@ -550,7 +551,12 @@ def usage():
 @cli.command()
 def tui():
     """Launch TUI dashboard."""
-    console.print("[cyan]Launching Forge TUI...[/cyan]")
+    try:
+        dashboard = Dashboard()
+        dashboard.run()
+    except Exception as e:
+        console.print(f"[red]Error launching TUI: {e}[/red]", err=True)
+        sys.exit(1)
 
 
 def main():

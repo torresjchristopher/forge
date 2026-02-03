@@ -7,9 +7,11 @@ __license__ = "MIT"
 from forge.runtime.executor import ContainerExecutor
 from forge.orchestration.engine import OrchestrationEngine
 from forge.scheduler.scheduler import WorkflowScheduler
+from forge.tui.dashboard import Dashboard
 
 __all__ = [
     "ContainerExecutor",
     "OrchestrationEngine",
     "WorkflowScheduler",
+    "Dashboard",
 ]
