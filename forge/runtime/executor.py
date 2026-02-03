@@ -14,6 +14,7 @@ from datetime import datetime
 
 from forge.runtime.filesystem import ContainerFilesystem, ImageSnapshot, ImageStore
 from forge.runtime.resources import ResourceLimiter
+from forge.runtime.network import ContainerNetworking
 
 
 @dataclass
@@ -21,13 +22,14 @@ class ContainerConfig:
     """Container configuration."""
     image: str
     command: List[str]
-    ports: Optional[Dict[int, int]] = None
-    volumes: Optional[Dict[str, str]] = None
+    ports: Optional[Dict[int, int]] = None  # container_port: host_port
+    volumes: Optional[Dict[str, str]] = None  # host_path: container_path
     env: Optional[Dict[str, str]] = None
     memory_limit: Optional[int] = None  # MB
     cpu_limit: Optional[int] = None     # percentage
     timeout: Optional[int] = None
     name: Optional[str] = None
+    hostname: Optional[str] = None
 
 
 @dataclass
@@ -58,6 +60,8 @@ class Container:
         # Lightweight components
         self.filesystem = ContainerFilesystem(container_id, base_dir / "containers")
         self.resources = ResourceLimiter(container_id, base_dir / "resources")
+        self.networking = ContainerNetworking(container_id)
+        self.port_mappings = {}  # container_port: host_port
         self.stats = ContainerStats(
             container_id=container_id,
             image=config.image,
@@ -65,11 +69,20 @@ class Container:
         )
     
     def prepare(self, image_snapshot: ImageSnapshot) -> bool:
-        """Prepare container filesystem and resources."""
+        """Prepare container filesystem, resources, and networking."""
         try:
             # Extract image (critical path - measure this)
             extraction_time = self.filesystem.prepare(image_snapshot)
             self.stats.extraction_time_ms = extraction_time * 1000
+            
+            # Set up networking namespace
+            self.networking.create_network_namespace()
+            
+            # Map ports
+            if self.config.ports:
+                for container_port, host_port in self.config.ports.items():
+                    actual_host_port = self.networking.map_port(container_port, host_port)
+                    self.port_mappings[container_port] = actual_host_port
             
             # Mount volumes
             if self.config.volumes:
@@ -141,13 +154,14 @@ class Container:
             self.status = "stopped"
     
     def cleanup(self) -> float:
-        """Delete container filesystem instantly."""
+        """Delete container filesystem and networking instantly."""
         import time
         start = time.time()
         
         self.stop()
         cleanup_time = self.filesystem.cleanup()
         self.resources.cleanup()
+        self.networking.cleanup_network()  # Clean up port mappings
         self.status = "cleaned"
         
         elapsed = time.time() - start
@@ -164,6 +178,8 @@ class Container:
             "memory_mb": self.stats.memory_mb,
             "filesystem_mb": self.stats.filesystem_mb,
             "extraction_time_ms": self.stats.extraction_time_ms,
+            "port_mappings": self.port_mappings,
+            "volumes": self.filesystem.volumes,
         }
 
 

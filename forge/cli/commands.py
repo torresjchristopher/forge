@@ -40,19 +40,49 @@ def container():
 @click.argument("command", nargs=-1, required=True)
 @click.option("--memory", type=int, help="Memory limit in MB")
 @click.option("--cpu", type=int, help="CPU limit as percentage")
+@click.option("-p", "--port", multiple=True, help="Port mapping (e.g., 8080:80)")
+@click.option("-v", "--volume", multiple=True, help="Volume mount (e.g., /host:/container)")
 @click.option("--timeout", type=int, help="Timeout in seconds")
-def run(image: str, command: tuple, memory: int, cpu: int, timeout: int):
-    """Run a container."""
+def run(image: str, command: tuple, memory: int, cpu: int, port: tuple, volume: tuple, timeout: int):
+    """Run a container.
+    
+    Example:
+        forge container run python:3.11 python app.py --port 8080:5000 --volume /data:/data
+    """
     start = time.time()
+    
+    # Parse port mappings
+    ports = {}
+    for p in port:
+        parts = p.split(":")
+        if len(parts) == 2:
+            host_port, container_port = int(parts[0]), int(parts[1])
+            ports[container_port] = host_port
+    
+    # Parse volumes
+    volumes = {}
+    for v in volume:
+        parts = v.split(":")
+        if len(parts) == 2:
+            host_path, container_path = parts
+            volumes[host_path] = container_path
+    
     config = ContainerConfig(
         image=image,
         command=list(command),
+        ports=ports if ports else None,
+        volumes=volumes if volumes else None,
         memory_limit=memory,
         cpu_limit=cpu,
         timeout=timeout,
     )
     
     console.print(f"[cyan]Running container: {image}[/cyan]")
+    if ports:
+        console.print(f"[dim]Port mappings: {ports}[/dim]")
+    if volumes:
+        console.print(f"[dim]Volumes: {volumes}[/dim]")
+    
     exit_code = executor.run_container(config)
     elapsed = time.time() - start
     
@@ -66,7 +96,7 @@ def run(image: str, command: tuple, memory: int, cpu: int, timeout: int):
 
 @container.command()
 def list():
-    """List all containers."""
+    """List all containers with details."""
     containers = executor.list_containers()
     
     if not containers:
@@ -79,15 +109,18 @@ def list():
     table.add_column("Status", style="yellow")
     table.add_column("Memory (MB)", justify="right")
     table.add_column("Filesystem (MB)", justify="right")
+    table.add_column("Ports", style="dim")
     
     for container in containers:
         stats = container.get_stats()
+        port_info = ", ".join([f"{k}→{v}" for k, v in stats.get("port_mappings", {}).items()]) or "—"
         table.add_row(
             container.container_id,
             container.config.image,
             container.status,
             f"{stats['memory_mb']:.1f}",
             f"{stats['filesystem_mb']:.1f}",
+            port_info,
         )
     
     console.print(table)

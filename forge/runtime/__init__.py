@@ -4,6 +4,7 @@ from forge.runtime.executor import ContainerExecutor, Container, ContainerConfig
 from forge.runtime.filesystem import ContainerFilesystem, ImageSnapshot, ImageStore
 from forge.runtime.resources import ResourceLimiter
 from forge.runtime.isolation import ContainerIsolation
+from forge.runtime.network import ContainerNetworking
 
 __all__ = [
     "ContainerExecutor",
@@ -15,4 +16,5 @@ __all__ = [
     "ImageStore",
     "ResourceLimiter",
     "ContainerIsolation",
+    "ContainerNetworking",
 ]
