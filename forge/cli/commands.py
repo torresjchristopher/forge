@@ -4,10 +4,12 @@ import click
 from pathlib import Path
 import sys
 import time
+import json
 
 from forge.runtime.executor import ContainerExecutor, ContainerConfig
 from forge.runtime.filesystem import ImageStore
 from forge.orchestration.engine import OrchestrationEngine
+from forge.orchestration.executor import WorkflowExecutor
 from forge.scheduler.scheduler import WorkflowScheduler
 from rich.console import Console
 from rich.table import Table
@@ -16,6 +18,7 @@ console = Console()
 executor = ContainerExecutor()
 image_store = ImageStore()
 orchestration = OrchestrationEngine()
+workflow_executor = WorkflowExecutor()
 scheduler = WorkflowScheduler()
 
 
@@ -228,15 +231,106 @@ def workflow():
 
 @workflow.command()
 @click.argument("name")
-def run(name: str):
-    """Run a workflow."""
-    console.print(f"[cyan]Running workflow: {name}[/cyan]")
+@click.option("--config", type=click.Path(exists=True), help="Path to workflow config file")
+def run(name: str, config: str):
+    """Run a workflow.
+    
+    Example:
+        forge workflow run daily_etl --config forge.yml
+    """
+    try:
+        if config:
+            with open(config) as f:
+                import yaml
+                config_data = yaml.safe_load(f)
+                workflow_config = config_data.get("workflows", {}).get(name)
+        else:
+            # Load from default forge.yml
+            with open("forge.yml") as f:
+                import yaml
+                config_data = yaml.safe_load(f)
+                workflow_config = config_data.get("workflows", {}).get(name)
+        
+        if not workflow_config:
+            console.print(f"[red]Workflow '{name}' not found[/red]")
+            return
+        
+        workflow_config["name"] = name
+        
+        console.print(f"[cyan]Running workflow: {name}[/cyan]")
+        start = time.time()
+        
+        result = workflow_executor.execute_workflow(workflow_config)
+        elapsed = time.time() - start
+        
+        # Display results
+        console.print("")
+        console.print(f"[bold]Workflow Execution Report[/bold]")
+        console.print(f"Status: {result.get('status').upper()}")
+        console.print(f"Duration: {result.get('duration_seconds', 0):.1f}s")
+        console.print(f"Tasks Completed: {result.get('tasks_completed', 0)}")
+        console.print(f"Tasks Failed: {result.get('tasks_failed', 0)}")
+        
+        if result.get("task_results"):
+            console.print("\n[bold]Task Details[/bold]")
+            table = Table()
+            table.add_column("Task ID", style="cyan")
+            table.add_column("Status", style="yellow")
+            table.add_column("Duration (s)", justify="right")
+            table.add_column("Exit Code", justify="right")
+            
+            for task_id, task_result in result["task_results"].items():
+                status_color = "green" if task_result.get("status") == "success" else "red"
+                table.add_row(
+                    task_id,
+                    f"[{status_color}]{task_result.get('status')}[/{status_color}]",
+                    f"{task_result.get('duration_seconds', 0):.1f}",
+                    str(task_result.get("exit_code", "—")),
+                )
+            
+            console.print(table)
+    
+    except FileNotFoundError:
+        console.print("[red]Could not find forge.yml or specified config file[/red]")
+    except Exception as e:
+        console.print(f"[red]Error running workflow: {e}[/red]")
 
 
 @workflow.command()
 def list():
     """List all workflows."""
-    console.print("[yellow]Workflows:[/yellow]")
+    try:
+        with open("forge.yml") as f:
+            import yaml
+            config = yaml.safe_load(f)
+            workflows = config.get("workflows", {})
+        
+        if not workflows:
+            console.print("[yellow]No workflows defined[/yellow]")
+            return
+        
+        table = Table(title="Workflows")
+        table.add_column("Name", style="cyan")
+        table.add_column("Schedule", style="green")
+        table.add_column("Tasks", justify="right")
+        table.add_column("Description", style="dim")
+        
+        for name, wf in workflows.items():
+            task_count = len(wf.get("tasks", []))
+            description = wf.get("description", "")
+            table.add_row(
+                name,
+                wf.get("schedule", "—"),
+                str(task_count),
+                description[:40],
+            )
+        
+        console.print(table)
+    
+    except FileNotFoundError:
+        console.print("[red]No forge.yml found[/red]")
+    except Exception as e:
+        console.print(f"[red]Error listing workflows: {e}[/red]")
 
 
 # ─── System Commands ───
