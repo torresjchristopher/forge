@@ -11,7 +11,7 @@ Lightning-fast alternative to Docker + Airflow combined. 5-10x leaner, considera
 - 🔄 **Embedded Airflow**: Full DAG scheduling, task execution, retries, SLAs—no separate database
 - 🧹 **Automatic Cleanup**: Self-pruning system, never bloats, stays under 500MB idle
 - ⚡ **Memory Efficient**: 30x lower idle footprint than Podman + Airflow
-- 📊 **Unified Dashboard**: TUI for containers + workflows (no separate UIs)
+- 📊 **Real-Time TUI Dashboard**: Monitor containers, workflows, and schedules in one place
 - 🛠️ **Single Configuration**: One YAML file for services + workflows
 
 ## Quick Start
@@ -103,10 +103,12 @@ forge tui
 
 ## Documentation
 
+- [Quick Reference](QUICKREF.md) - Command cheat sheet
+- [TUI Guide](TUI.md) - Dashboard and monitoring
+- [Scheduler Guide](SCHEDULER.md) - Workflow scheduling
+- [Implementation Details](IMPLEMENTATION.md) - Architecture deep dive
 - [Installation Guide](docs/INSTALL.md)
 - [Configuration Reference](docs/CONFIG.md)
-- [Runtime API](docs/RUNTIME.md)
-- [Orchestration Guide](docs/ORCHESTRATION.md)
 - [Examples](examples/)
 
 ## Development
@@ -117,14 +119,19 @@ forge tui
 forge/
 ├── forge/
 │   ├── runtime/          # Container execution engine
-│   ├── orchestration/    # Workflow management
-│   ├── scheduler/        # Task scheduling (APScheduler wrapper)
+│   ├── orchestration/    # Workflow DAG management
+│   ├── scheduler/        # Task scheduling (APScheduler)
+│   ├── tui/              # Terminal dashboard (Rich)
 │   ├── storage/          # Persistence layer
 │   ├── cli/              # Command-line interface
 │   └── utils/            # Utilities
 ├── tests/
 ├── docs/
-└── examples/
+├── examples/
+├── TUI.md                # Dashboard documentation
+├── SCHEDULER.md          # Scheduler documentation
+├── QUICKREF.md           # Command reference
+└── IMPLEMENTATION.md     # Technical deep dive
 ```
 
 ### Setup Development Environment
