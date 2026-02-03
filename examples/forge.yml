@@ -1,0 +1,68 @@
+"""Example forge.yml configuration."""
+
+services:
+  postgres:
+    image: postgres-snapshot:15
+    ports:
+      - 5432
+    volumes:
+      data: /var/lib/postgresql/data
+    env:
+      POSTGRES_DB: mydb
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password
+    restart_policy: always
+
+  redis:
+    image: redis-snapshot:7
+    ports:
+      - 6379
+    restart_policy: always
+
+workflows:
+  daily_etl:
+    schedule: "0 2 * * *"
+    description: "Daily ETL pipeline"
+    enabled: true
+    
+    tasks:
+      - name: extract_data
+        image: python-etl:latest
+        command: python extract.py
+        depends_on: [postgres]
+        timeout: 1800
+        retries: 3
+        retry_delay: 300
+      
+      - name: validate_data
+        image: python-etl:latest
+        command: python validate.py
+        depends_on: [extract_data]
+        timeout: 900
+        
+      - name: transform_data
+        image: python-etl:latest
+        command: python transform.py
+        depends_on: [validate_data]
+        timeout: 3600
+        
+      - name: load_warehouse
+        image: python-etl:latest
+        command: python load.py
+        depends_on: [transform_data]
+        timeout: 1800
+        retries: 2
+        on_failure: email_alert
+        sla: 7200
+
+  hourly_sync:
+    schedule: "0 * * * *"
+    description: "Hourly data sync"
+    enabled: true
+    
+    tasks:
+      - name: sync_api
+        image: python-sync:latest
+        command: python sync_api.py
+        timeout: 600
+        retries: 1
