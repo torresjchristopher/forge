@@ -3,6 +3,20 @@
 import click
 from pathlib import Path
 import sys
+import time
+
+from forge.runtime.executor import ContainerExecutor, ContainerConfig
+from forge.runtime.filesystem import ImageStore
+from forge.orchestration.engine import OrchestrationEngine
+from forge.scheduler.scheduler import WorkflowScheduler
+from rich.console import Console
+from rich.table import Table
+
+console = Console()
+executor = ContainerExecutor()
+image_store = ImageStore()
+orchestration = OrchestrationEngine()
+scheduler = WorkflowScheduler()
 
 
 @click.group()
@@ -10,6 +24,138 @@ import sys
 def cli():
     """Forge: Lightning-fast container orchestration + embedded workflows."""
     pass
+
+
+# ─── Container Commands ───
+
+
+@cli.group()
+def container():
+    """Manage containers."""
+    pass
+
+
+@container.command()
+@click.argument("image")
+@click.argument("command", nargs=-1, required=True)
+@click.option("--memory", type=int, help="Memory limit in MB")
+@click.option("--cpu", type=int, help="CPU limit as percentage")
+@click.option("--timeout", type=int, help="Timeout in seconds")
+def run(image: str, command: tuple, memory: int, cpu: int, timeout: int):
+    """Run a container."""
+    start = time.time()
+    config = ContainerConfig(
+        image=image,
+        command=list(command),
+        memory_limit=memory,
+        cpu_limit=cpu,
+        timeout=timeout,
+    )
+    
+    console.print(f"[cyan]Running container: {image}[/cyan]")
+    exit_code = executor.run_container(config)
+    elapsed = time.time() - start
+    
+    if exit_code == 0:
+        console.print(f"[green]✓ Completed in {elapsed:.2f}s[/green]")
+    else:
+        console.print(f"[red]✗ Failed with exit code {exit_code}[/red]")
+    
+    sys.exit(exit_code)
+
+
+@container.command()
+def list():
+    """List all containers."""
+    containers = executor.list_containers()
+    
+    if not containers:
+        console.print("[yellow]No containers[/yellow]")
+        return
+    
+    table = Table(title="Containers")
+    table.add_column("ID", style="cyan")
+    table.add_column("Image", style="green")
+    table.add_column("Status", style="yellow")
+    table.add_column("Memory (MB)", justify="right")
+    table.add_column("Filesystem (MB)", justify="right")
+    
+    for container in containers:
+        stats = container.get_stats()
+        table.add_row(
+            container.container_id,
+            container.config.image,
+            container.status,
+            f"{stats['memory_mb']:.1f}",
+            f"{stats['filesystem_mb']:.1f}",
+        )
+    
+    console.print(table)
+
+
+@container.command()
+@click.argument("container_id")
+def delete(container_id: str):
+    """Delete a container instantly."""
+    start = time.time()
+    cleanup_time = executor.delete_container(container_id)
+    elapsed = time.time() - start
+    
+    console.print(f"[green]✓ Deleted {container_id} in {elapsed*1000:.0f}ms[/green]")
+
+
+@container.command()
+def prune():
+    """Delete all stopped containers instantly."""
+    executor.cleanup_all()
+    console.print("[green]✓ Pruned all containers[/green]")
+
+
+# ─── Image Commands ───
+
+
+@cli.group()
+def image():
+    """Manage images."""
+    pass
+
+
+@image.command()
+def list():
+    """List all images."""
+    images = image_store.list_images()
+    
+    if not images:
+        console.print("[yellow]No images[/yellow]")
+        return
+    
+    table = Table(title="Images")
+    table.add_column("Name", style="cyan")
+    table.add_column("Size (MB)", justify="right")
+    table.add_column("Created", style="dim")
+    
+    for img in images:
+        table.add_row(
+            img["name"],
+            f"{img['size_mb']:.1f}",
+            img.get("created", "unknown")[:10],
+        )
+    
+    console.print(table)
+
+
+@image.command()
+@click.argument("image_name")
+def delete(image_name: str):
+    """Delete an image instantly."""
+    start = time.time()
+    delete_time = image_store.delete_image(image_name)
+    elapsed = time.time() - start
+    
+    console.print(f"[green]✓ Deleted {image_name} in {elapsed*1000:.0f}ms[/green]")
+
+
+# ─── Service Commands ───
 
 
 @cli.group()
@@ -22,20 +168,23 @@ def service():
 @click.argument("name")
 def start(name: str):
     """Start a service."""
-    click.echo(f"Starting service: {name}")
+    console.print(f"[cyan]Starting service: {name}[/cyan]")
 
 
 @service.command()
 @click.argument("name")
 def stop(name: str):
     """Stop a service."""
-    click.echo(f"Stopping service: {name}")
+    console.print(f"[cyan]Stopping service: {name}[/cyan]")
 
 
 @service.command()
 def list():
     """List all services."""
-    click.echo("Services:")
+    console.print("[yellow]Services:[/yellow]")
+
+
+# ─── Workflow Commands ───
 
 
 @cli.group()
@@ -48,20 +197,16 @@ def workflow():
 @click.argument("name")
 def run(name: str):
     """Run a workflow."""
-    click.echo(f"Running workflow: {name}")
-
-
-@workflow.command()
-@click.argument("name")
-def pause(name: str):
-    """Pause a workflow."""
-    click.echo(f"Pausing workflow: {name}")
+    console.print(f"[cyan]Running workflow: {name}[/cyan]")
 
 
 @workflow.command()
 def list():
     """List all workflows."""
-    click.echo("Workflows:")
+    console.print("[yellow]Workflows:[/yellow]")
+
+
+# ─── System Commands ───
 
 
 @cli.group()
@@ -73,19 +218,40 @@ def system():
 @system.command()
 def prune():
     """Auto-prune unused images and logs."""
-    click.echo("Pruning unused data...")
+    console.print("[cyan]Pruning unused data...[/cyan]")
+    
+    start = time.time()
+    result = image_store.cleanup_unused([])
+    elapsed = time.time() - start
+    
+    console.print(f"[green]✓ Deleted {result['deleted_count']} images, freed {result['freed_mb']} MB in {elapsed:.2f}s[/green]")
 
 
 @system.command()
 def usage():
     """Show system usage and storage."""
-    click.echo("System Usage:")
+    images = image_store.list_images()
+    containers = executor.list_containers()
+    
+    total_image_size = sum(img["size_mb"] for img in images)
+    total_container_size = sum(c.stats.filesystem_mb for c in containers)
+    
+    table = Table(title="System Usage")
+    table.add_column("Component", style="cyan")
+    table.add_column("Size (MB)", justify="right")
+    table.add_column("Count", justify="right")
+    
+    table.add_row("Images", f"{total_image_size:.1f}", str(len(images)))
+    table.add_row("Containers", f"{total_container_size:.1f}", str(len(containers)))
+    table.add_row("Total", f"{total_image_size + total_container_size:.1f}", "")
+    
+    console.print(table)
 
 
 @cli.command()
 def tui():
     """Launch TUI dashboard."""
-    click.echo("Launching Forge TUI...")
+    console.print("[cyan]Launching Forge TUI...[/cyan]")
 
 
 def main():
@@ -93,7 +259,7 @@ def main():
     try:
         cli()
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
+        console.print(f"[red]Error: {e}[/red]", err=True)
         sys.exit(1)
 
 
