@@ -4,6 +4,7 @@ import json
 import os
 import psutil
 import subprocess
+import msvcrt
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
@@ -24,6 +25,10 @@ from forge.tui.widgets import (
     WorkflowStatus,
     SystemMetrics,
 )
+from forge.runtime.executor import ContainerExecutor
+from forge.scheduler.manager import SchedulerManager
+from forge.orchestration.executor import WorkflowExecutor
+from forge.runtime.filesystem import ImageStore
 
 
 class Dashboard:
@@ -32,10 +37,20 @@ class Dashboard:
     def __init__(self):
         self.console = Console()
         self.running = True
-        self.current_view = "overview"  # overview, workflows, containers, scheduler, logs
+        self.current_view = "overview"  # overview, workflows, containers, scheduler, logs, images
         self.selected_workflow = None
         self.selected_container = None
         self.selected_task = None
+        
+        # Interactive state
+        self.cursor_index = 0
+        self.current_item_count = 0
+        
+        # Backend managers
+        self.executor = ContainerExecutor()
+        self.scheduler = SchedulerManager()
+        self.workflow_executor = WorkflowExecutor()
+        self.image_store = ImageStore()
 
     def run(self):
         """Start the interactive dashboard"""
@@ -43,6 +58,21 @@ class Dashboard:
             with Live(self.get_layout(), refresh_per_second=2, console=self.console) as live:
                 while self.running:
                     live.update(self.get_layout())
+                    
+                    if msvcrt.kbhit():
+                        key = msvcrt.getch()
+                        try:
+                            # Handle special keys (arrows often start with 0xe0 or 0x00)
+                            if key in (b'\x00', b'\xe0'):
+                                code = msvcrt.getch()
+                                if code == b'H': self.handle_input('up')
+                                elif code == b'P': self.handle_input('down')
+                                continue 
+                            
+                            char = key.decode('utf-8').lower()
+                            self.handle_input(char)
+                        except:
+                            pass
         except KeyboardInterrupt:
             self.running = False
             self.console.print("\n[yellow]Dashboard closed[/yellow]")
@@ -70,6 +100,7 @@ class Dashboard:
             ("3", "Containers", self.current_view == "containers"),
             ("4", "Scheduler", self.current_view == "scheduler"),
             ("5", "Logs", self.current_view == "logs"),
+            ("6", "Images", self.current_view == "images"),
         ]
 
         nav_items = []
@@ -95,6 +126,8 @@ class Dashboard:
             return self.render_scheduler()
         elif self.current_view == "logs":
             return self.render_logs()
+        elif self.current_view == "images":
+            return self.render_images()
         else:
             return Panel("[yellow]Unknown view[/yellow]")
 
@@ -115,6 +148,7 @@ class Dashboard:
 
         metrics = self.get_system_metrics()
         workflows = self.get_workflow_statuses()
+        self.current_item_count = len(workflows)
 
         left["metrics"].update(MetricsPanel.system_metrics_panel(metrics))
         left["summary"].update(MetricsPanel.workflow_summary_panel(workflows))
@@ -123,7 +157,7 @@ class Dashboard:
         body["left"].update(left)
         body["right"].update(
             Panel(
-                StatusTable.workflows_table(workflows),
+                StatusTable.workflows_table(workflows, selected_index=self.cursor_index if self.current_view == "overview" else None),
                 box=box.ROUNDED,
             )
         )
@@ -133,11 +167,12 @@ class Dashboard:
     def render_workflows(self) -> Panel:
         """Render workflows view"""
         workflows = self.get_workflow_statuses()
+        self.current_item_count = len(workflows)
 
         if not workflows:
             return Panel("[yellow]No workflows found[/yellow]")
 
-        table = StatusTable.workflows_table(workflows)
+        table = StatusTable.workflows_table(workflows, selected_index=self.cursor_index)
 
         if self.selected_workflow and workflows:
             # Show detailed view of selected workflow
@@ -166,21 +201,23 @@ class Dashboard:
     def render_containers(self) -> Panel:
         """Render containers view"""
         containers = self.get_container_statuses()
+        self.current_item_count = len(containers)
 
         if not containers:
             return Panel("[yellow]No containers found[/yellow]")
 
-        table = StatusTable.containers_table(containers)
+        table = StatusTable.containers_table(containers, selected_index=self.cursor_index)
         return Panel(table, box=box.ROUNDED)
 
     def render_scheduler(self) -> Panel:
         """Render scheduler view"""
         schedules = self.get_scheduled_workflows()
+        self.current_item_count = len(schedules)
 
         if not schedules:
             return Panel("[yellow]No scheduled workflows[/yellow]")
 
-        table = StatusTable.schedulers_table(schedules)
+        table = StatusTable.schedulers_table(schedules, selected_index=self.cursor_index)
         return Panel(table, box=box.ROUNDED)
 
     def render_logs(self) -> Panel:
@@ -199,13 +236,32 @@ class Dashboard:
         except Exception as e:
             return Panel(f"[red]Error loading logs: {e}[/red]")
 
+    def render_images(self) -> Panel:
+        """Render images view"""
+        images = self.get_image_statuses()
+        self.current_item_count = len(images)
+
+        if not images:
+            return Panel("[yellow]No images found[/yellow]")
+
+        table = StatusTable.images_table(images, selected_index=self.cursor_index)
+        return Panel(table, box=box.ROUNDED)
+
     def render_footer(self) -> Panel:
-        """Render footer with help text"""
-        help_text = (
-            "[cyan]↑↓[/cyan] Navigate | [cyan]Enter[/cyan] Select | "
-            "[cyan]q[/cyan] Quit | [cyan]r[/cyan] Refresh | [cyan]c[/cyan] Clear"
-        )
-        return Panel(help_text, box=box.ROUNDED, expand=True)
+        """Render footer with context-sensitive help text"""
+        base_help = "[cyan]↑↓[/cyan] Navigate | [cyan]Enter[/cyan] Select | [cyan]q[/cyan] Quit | [cyan]r[/cyan] Refresh"
+        
+        ctx_help = ""
+        if self.current_view == "containers":
+            ctx_help = " | [cyan]d[/cyan] Delete | [cyan]p[/cyan] Prune"
+        elif self.current_view == "workflows":
+            ctx_help = " | [cyan]t[/cyan] Trigger | [cyan]c[/cyan] Clear Detail"
+        elif self.current_view == "scheduler":
+            ctx_help = " | [cyan]p[/cyan] Pause/Resume | [cyan]t[/cyan] Trigger Now"
+        elif self.current_view == "images":
+            ctx_help = " | [cyan]d[/cyan] Delete"
+
+        return Panel(base_help + ctx_help, box=box.ROUNDED, expand=True)
 
     def get_system_metrics(self) -> SystemMetrics:
         """Collect current system metrics"""
@@ -264,15 +320,15 @@ class Dashboard:
                                 workflow_id=workflow_id,
                                 execution_id=latest.get("execution_id", "N/A"),
                                 status=latest.get("status", "unknown"),
-                                tasks_total=len(latest.get("tasks", {})),
+                                tasks_total=len(latest.get("tasks", {{}})),
                                 tasks_completed=sum(
                                     1
-                                    for t in latest.get("tasks", {}).values()
+                                    for t in latest.get("tasks", {{}}).values()
                                     if t.get("status") == "success"
                                 ),
                                 tasks_failed=sum(
                                     1
-                                    for t in latest.get("tasks", {}).values()
+                                    for t in latest.get("tasks", {{}}).values()
                                     if t.get("status") == "failed"
                                 ),
                                 started_at=latest.get("started_at", "N/A"),
@@ -345,20 +401,72 @@ class Dashboard:
 
         return schedules
 
+    def get_image_statuses(self) -> List[Dict[str, Any]]:
+        """Load image statuses"""
+        try:
+            return self.image_store.list_images()
+        except:
+            return []
+
     def handle_input(self, key: str):
-        """Handle keyboard input"""
+        """Handle keyboard input with context-aware actions"""
         if key == "q":
             self.running = False
         elif key == "1":
-            self.current_view = "overview"
+            self.current_view = "overview"; self.cursor_index = 0
         elif key == "2":
-            self.current_view = "workflows"
+            self.current_view = "workflows"; self.cursor_index = 0
         elif key == "3":
-            self.current_view = "containers"
+            self.current_view = "containers"; self.cursor_index = 0
         elif key == "4":
-            self.current_view = "scheduler"
+            self.current_view = "scheduler"; self.cursor_index = 0
         elif key == "5":
-            self.current_view = "logs"
-        elif key == "r":
-            # Refresh is automatic
-            pass
+            self.current_view = "logs"; self.cursor_index = 0
+        elif key == "6":
+            self.current_view = "images"; self.cursor_index = 0
+        
+        elif key == "up":
+            self.cursor_index = max(0, self.cursor_index - 1)
+        elif key == "down":
+            self.cursor_index = min(self.current_item_count - 1, self.cursor_index + 1) if self.current_item_count > 0 else 0
+        
+        elif key == "\r" or key == "\n": # Enter
+            if self.current_view == "workflows" or self.current_view == "overview":
+                workflows = self.get_workflow_statuses()
+                if 0 <= self.cursor_index < len(workflows):
+                    self.selected_workflow = workflows[self.cursor_index].workflow_id
+        
+        elif key == "c":
+            self.selected_workflow = None
+            self.selected_task = None
+            
+        elif self.current_view == "containers":
+            if key == "d":
+                containers = self.get_container_statuses()
+                if 0 <= self.cursor_index < len(containers):
+                    self.executor.delete_container(containers[self.cursor_index].name)
+            elif key == "p":
+                self.executor.cleanup_all()
+                
+        elif self.current_view == "scheduler":
+            schedules = self.get_scheduled_workflows()
+            if 0 <= self.cursor_index < len(schedules):
+                wf_id = schedules[self.cursor_index]["workflow_id"]
+                if key == "p":
+                    enabled = schedules[self.cursor_index].get("enabled", True)
+                    if enabled: self.scheduler.pause_workflow(wf_id)
+                    else: self.scheduler.resume_workflow(wf_id)
+                elif key == "t":
+                    self.scheduler.trigger_now(wf_id)
+        
+        elif self.current_view == "workflows":
+            if key == "t":
+                workflows = self.get_workflow_statuses()
+                if 0 <= self.cursor_index < len(workflows):
+                    self.scheduler.trigger_now(workflows[self.cursor_index].workflow_id)
+
+        elif self.current_view == "images":
+            if key == "d":
+                images = self.get_image_statuses()
+                if 0 <= self.cursor_index < len(images):
+                    self.image_store.delete_image(images[self.cursor_index]["name"])

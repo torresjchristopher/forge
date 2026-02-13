@@ -57,7 +57,7 @@ class StatusTable:
     """Renders status tables for containers, workflows, etc."""
 
     @staticmethod
-    def containers_table(containers: List[ContainerStatus]) -> Table:
+    def containers_table(containers: List[ContainerStatus], selected_index: Optional[int] = None) -> Table:
         """Create a table of container statuses"""
         table = Table(title="Containers", box=box.ROUNDED, show_header=True)
         table.add_column("Name", style="cyan")
@@ -67,8 +67,9 @@ class StatusTable:
         table.add_column("CPU", justify="right")
         table.add_column("Uptime", justify="right")
 
-        for container in containers:
+        for i, container in enumerate(containers):
             status_style = "green" if container.status == "running" else "red"
+            row_style = "reverse" if selected_index is not None and i == selected_index else ""
             table.add_row(
                 container.name,
                 container.image,
@@ -76,12 +77,13 @@ class StatusTable:
                 f"{container.memory_mb:.1f} MB",
                 f"{container.cpu_percent:.1f}%",
                 format_uptime(container.uptime_seconds),
+                style=row_style
             )
 
         return table
 
     @staticmethod
-    def workflows_table(workflows: List[WorkflowStatus]) -> Table:
+    def workflows_table(workflows: List[WorkflowStatus], selected_index: Optional[int] = None) -> Table:
         """Create a table of workflow statuses"""
         table = Table(title="Workflows", box=box.ROUNDED, show_header=True)
         table.add_column("Workflow", style="cyan")
@@ -90,7 +92,7 @@ class StatusTable:
         table.add_column("Duration", justify="right")
         table.add_column("Failed", justify="right")
 
-        for workflow in workflows:
+        for i, workflow in enumerate(workflows):
             status_style = "green" if workflow.status == "success" else (
                 "yellow" if workflow.status == "running" else "red"
             )
@@ -100,6 +102,7 @@ class StatusTable:
                 if workflow.duration_seconds
                 else "—"
             )
+            row_style = "reverse" if selected_index is not None and i == selected_index else ""
 
             table.add_row(
                 workflow.workflow_id,
@@ -107,12 +110,13 @@ class StatusTable:
                 progress,
                 duration,
                 str(workflow.tasks_failed),
+                style=row_style
             )
 
         return table
 
     @staticmethod
-    def schedulers_table(schedules: List[Dict[str, Any]]) -> Table:
+    def schedulers_table(schedules: List[Dict[str, Any]], selected_index: Optional[int] = None) -> Table:
         """Create a table of scheduled workflows"""
         table = Table(title="Scheduled Workflows", box=box.ROUNDED, show_header=True)
         table.add_column("Workflow", style="cyan")
@@ -120,15 +124,36 @@ class StatusTable:
         table.add_column("Next Run", style="magenta")
         table.add_column("Status", style="green")
 
-        for schedule in schedules:
+        for i, schedule in enumerate(schedules):
             enabled_style = "green" if schedule.get("enabled", True) else "red"
             enabled_text = "✓" if schedule.get("enabled", True) else "✗"
+            row_style = "reverse" if selected_index is not None and i == selected_index else ""
 
             table.add_row(
                 schedule.get("workflow_id", "N/A"),
                 schedule.get("cron_expression", "N/A"),
                 schedule.get("next_run", "N/A"),
                 Text(enabled_text, style=enabled_style),
+                style=row_style
+            )
+
+        return table
+
+    @staticmethod
+    def images_table(images: List[Dict[str, Any]], selected_index: Optional[int] = None) -> Table:
+        """Create a table of image statuses"""
+        table = Table(title="Images", box=box.ROUNDED, show_header=True)
+        table.add_column("Name", style="cyan")
+        table.add_column("Size (MB)", justify="right")
+        table.add_column("Created", style="dim")
+
+        for i, img in enumerate(images):
+            row_style = "reverse" if selected_index is not None and i == selected_index else ""
+            table.add_row(
+                img.get("name", "N/A"),
+                f"{img.get('size_mb', 0):.1f} MB",
+                img.get("created", "unknown")[:10],
+                style=row_style
             )
 
         return table
