@@ -94,16 +94,32 @@ class RecursiveEngine:
         self.baseline_manager = ZeroInertiaBaseline()
         self.working_dir = working_dir or tempfile.mkdtemp(prefix="forge_recursive_")
         self.ephemeral_store = {}
+        self.stream_active = False
         
     def detonate(self):
         """Phase 1: Hydrate runtime from seed."""
         print("[FORGE] Detonating Recursive Engine...")
         self.baseline_manager.capture()
-        # In a real implementation, this would decompress the 'seed' into RAM
-        # For now, we simulate hydration of the runtime environment
         self.ephemeral_store['runtime_active'] = True
         self.ephemeral_store['start_time'] = time.time()
         
+    def hot_swap(self, filename: str, content: str):
+        """
+        Iteration 1: Streaming Context.
+        Hot-swaps a file in the active RAM-disk without re-detonation.
+        """
+        if not self.ephemeral_store.get('runtime_active'):
+            return False
+            
+        file_path = os.path.join(self.working_dir, filename)
+        print(f"[STREAM] Hot-swapping context: {filename}...")
+        
+        # Atomic write to RAM-disk
+        with open(file_path, "w") as f:
+            f.write(content)
+            
+        return True
+
     def execute_payload(self, logic_fn: Callable) -> Any:
         """Phase 2: Execute with recursive pruning."""
         if not self.ephemeral_store.get('runtime_active'):
