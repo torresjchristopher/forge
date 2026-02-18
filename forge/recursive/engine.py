@@ -154,7 +154,8 @@ class RecursiveEngine:
         
         # 4. Verify Baseline
         report = self.baseline_manager.verify_reversion()
-        print(f"[FORGE] Implosion Complete. Drift: {report['drift']}")
+        drift = report.get('drift', 'Unknown')
+        print(f"[FORGE] Implosion Complete. Drift: {drift}")
         
     def __enter__(self):
         self.detonate()
