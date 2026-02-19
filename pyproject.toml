@@ -1,7 +1,7 @@
 [project]
 name = "forge-runtime"
-version = "0.1.0"
-description = "Integrated container runtime + embedded workflow orchestration. Lightning-fast alternative to Docker + Airflow."
+version = "1.0.0"
+description = "Forge Engine: Ephemeral Task Execution Runtime. Part of the Ethereal Compute Platform by Yukora AI Lab. Lightning-fast, zero-persistence infrastructure."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
